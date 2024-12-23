@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <title>예약 시스템</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+    }
+    #reservationForm, #reservationListPopup, #practiceRoomInfo {
+      display: none;
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background-color: #fff;
+      padding: 20px;
+      border: 1px solid #ccc;
+      z-index: 1000;
+    }
+    #overlay {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(0,0,0,0.5);
+      z-index: 999;
+    }
+    /* 기타 스타일 */
+  </style>
+  <!-- FullCalendar CSS 및 JS 포함 -->
+  <link href='https://cdn.jsdelivr.net/npm/fullcalendar@5.11.0/main.min.css' rel='stylesheet' />
+  <script src='https://cdn.jsdelivr.net/npm/fullcalendar@5.11.0/main.min.js'></script>
+</head>
+<body>
+  <!-- 오버레이 -->
+  <div id="overlay"></div>
+
+  <!-- 연습실 정보 버튼 -->
+  <button onclick="showPracticeRoomInfo()">연습실 정보</button>
+
+  <!-- 연습실 정보 팝업 -->
+  <div id="practiceRoomInfo">
+    <h2>연습실 정보</h2>
+    <p>위치: D동 412호</p>
+    <p>이용 가능 시간:</p>
+    <ul>
+      <li>화요일, 금요일: 17:00 ~ 23:00</li>
+      <li>일요일: 10:00 ~ 17:00</li>
+    </ul>
+    <button onclick="closePracticeRoomInfo()">닫기</button>
+  </div>
+
+  <h1>예약 캘린더</h1>
+  <div id='calendar'></div>
+
+<!-- 예약 추가 팝업 -->
+<div id='reservationForm'>
+  <h2>예약 추가</h2>
+  <form>
+    <div>
+      <label for="name">이름:</label><br>
+      <input type="text" id="name" required>
+    </div>
+    <div>
+      <label for="date">날짜:</label><br>
+      <input type="date" id="date" required>
+    </div>
+    <div>
+      <label for="startTime">시작 시간:</label><br>
+      <input type="time" id="startTime" required>
+    </div>
+    <div>
+      <label for="endTime">종료 시간:</label><br>
+      <input type="time" id="endTime" required>
+    </div>
+    <div>
+      <label for="details">상세 내용:</label><br>
+      <textarea id="details"></textarea>
+    </div>
+    <div style="margin-top: 20px;">
+      <button type="button" onclick="submitReservation()">예약 추가</button>
+      <button type="button" onclick="closeReservationForm()">취소</button>
+    </div>
+  </form>
+</div>
+
+
+  <!-- 예약 내역 팝업 -->
+  <div id="reservationListPopup">
+    <h2 id="selectedDate"></h2>
+    <ul id="reservationList"></ul>
+    <button onclick="openReservationForm()">예약 추가</button>
+    <button onclick="closeReservationListPopup()">닫기</button>
+  </div>
+
+  <script>
+    var calendar; // 전역 변수로 선언하여 캘린더를 재사용합니다.
+
+    document.addEventListener('DOMContentLoaded', function() {
+      loadCalendar();
+    });
+
+    function loadCalendar() {
+      google.script.run.withSuccessHandler(function(reservations) {
+        var calendarEl = document.getElementById('calendar');
+        if (calendar) {
+          calendar.destroy(); // 기존 캘린더가 있으면 파괴합니다.
+        }
+        calendar = new FullCalendar.Calendar(calendarEl, {
+          initialView: 'dayGridMonth',
+          events: reservations.map(function(r) {
+            return {
+              id: r.id,
+              title: r.name,
+              start: r.start,
+              end: r.end
+            };
+          }),
+          dateClick: function(info) {
+            // 클릭된 날짜의 요일 확인
+            var clickedDate = new Date(info.dateStr);
+            var dayOfWeek = clickedDate.getDay(); // 일요일=0, 월요일=1, ..., 토요일=6
+
+            // 예약 가능 요일 설정 (화요일=2, 금요일=5, 일요일=0)
+            var allowedDays = [0, 2, 5];
+
+            if (allowedDays.includes(dayOfWeek)) {
+              // 예약 가능한 요일인 경우 예약 팝업 표시
+              showReservationsForDate(info.dateStr);
+            } else {
+              // 예약 불가능한 요일인 경우 메시지 표시
+              alert('예약은 화요일, 금요일, 일요일에만 가능합니다.');
+            }
+          },
+          eventClick: function(info) {
+            if (confirm('이 예약을 삭제하시겠습니까?')) {
+              deleteReservation(info.event.id);
+            }
+          }
+        });
+        calendar.render();
+      }).getReservations();
+    }
+
+    function showReservationsForDate(dateStr) {
+      document.getElementById('selectedDate').innerText = dateStr;
+      document.getElementById('date').value = dateStr;
+
+      google.script.run.withSuccessHandler(function(reservations) {
+        var listEl = document.getElementById('reservationList');
+        listEl.innerHTML = '';
+        reservations.forEach(function(r) {
+          var reservationDate = r.start.split('T')[0];
+          if (reservationDate === dateStr) {
+            var li = document.createElement('li');
+            li.innerText = r.name + ' - ' + new Date(r.start).toLocaleTimeString() + ' ~ ' + new Date(r.end).toLocaleTimeString();
+            listEl.appendChild(li);
+          }
+        });
+        showPopup('reservationListPopup');
+      }).getReservations();
+    }
+
+    function openReservationForm() {
+      showPopup('reservationForm');
+      hidePopup('reservationListPopup');
+    }
+
+    function closeReservationForm() {
+      hidePopup('reservationForm');
+    }
+
+    function closeReservationListPopup() {
+      hidePopup('reservationListPopup');
+    }
+
+    function submitReservation() {
+      var reservation = {
+        name: document.getElementById('name').value,
+        date: document.getElementById('date').value,
+        startTime: document.getElementById('startTime').value,
+        endTime: document.getElementById('endTime').value,
+        details: document.getElementById('details').value
+      };
+      google.script.run.withSuccessHandler(function(response) {
+        alert(response);
+        if (response.includes('성공적으로')) {
+          closeReservationForm();
+          loadCalendar();
+        }
+      }).addReservation(reservation);
+    }
+
+    function deleteReservation(eventId) {
+      if (confirm('이 예약을 삭제하시겠습니까?')) {
+        google.script.run.withSuccessHandler(function(response) {
+          alert(response);
+          loadCalendar();
+        }).deleteReservation(eventId);
+      }
+    }
+
+    // 연습실 정보 팝업 표시
+    function showPracticeRoomInfo() {
+      showPopup('practiceRoomInfo');
+    }
+
+    // 연습실 정보 팝업 닫기
+    function closePracticeRoomInfo() {
+      hidePopup('practiceRoomInfo');
+    }
+
+    // 팝업 표시 함수
+    function showPopup(id) {
+      document.getElementById('overlay').style.display = 'block';
+      document.getElementById(id).style.display = 'block';
+    }
+
+    // 팝업 숨김 함수
+    function hidePopup(id) {
+      document.getElementById('overlay').style.display = 'none';
+      document.getElementById(id).style.display = 'none';
+    }
+  </script>
+</body>
+</html>
